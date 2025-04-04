@@ -1,0 +1,866 @@
+import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingRegressor, RandomForestRegressor
+from sklearn.metrics import classification_report, mean_squared_error, confusion_matrix, accuracy_score
+from xgboost import XGBClassifier
+import joblib
+
+class EnhancedReverseLogisticsModel:
+    """
+    Enhanced framework for building machine learning models to optimize reverse logistics operations
+    based on the complete flow: Return Prediction → Collection Centers → Disposition Decision
+    (Resale, Repair/Remanufacture, Recycling, or Disposal)
+    """
+    
+    def __init__(self):
+        self.return_classifier = None
+        self.processing_time_regressor = None
+        self.disposition_classifier = None
+        self.transportation_optimizer = None
+        self.return_preprocessing = None
+        self.time_preprocessing = None
+        self.disposition_preprocessing = None
+        self.transportation_preprocessing = None
+        
+    def prepare_return_prediction_data(self, data):
+        """
+        Prepare and preprocess data for return prediction model
+        """
+        # Define feature types
+        categorical_features = ['product_category', 'payment_method', 'shipping_method', 
+                               'customer_segment', 'day_of_week', 'season']
+        numerical_features = ['price', 'discount_percentage', 'order_total', 
+                             'days_until_delivery', 'customer_tenure_days',
+                             'previous_orders', 'previous_returns']
+        
+        # Create preprocessing steps
+        categorical_transformer = Pipeline(steps=[
+            ('onehot', OneHotEncoder(handle_unknown='ignore'))
+        ])
+        
+        numerical_transformer = Pipeline(steps=[
+            ('scaler', StandardScaler())
+        ])
+        
+        # Combine preprocessing steps
+        self.return_preprocessing = ColumnTransformer(
+            transformers=[
+                ('num', numerical_transformer, numerical_features),
+                ('cat', categorical_transformer, categorical_features)
+            ])
+        
+        return self.return_preprocessing
+    
+    def prepare_disposition_decision_data(self, data):
+        """
+        Prepare and preprocess data for disposition decision model
+        (resale, repair/remanufacture, recycle, or dispose)
+        """
+        # Define feature types for disposition decision
+        categorical_features = ['product_category', 'return_reason', 'product_age_category',
+                               'season', 'brand_tier']
+        numerical_features = ['price', 'days_since_purchase', 'product_age_days',
+                             'condition_score', 'estimated_repair_cost',
+                             'estimated_resale_value', 'recyclable_components_percentage']
+        
+        # Create preprocessing steps
+        categorical_transformer = Pipeline(steps=[
+            ('onehot', OneHotEncoder(handle_unknown='ignore'))
+        ])
+        
+        numerical_transformer = Pipeline(steps=[
+            ('scaler', StandardScaler())
+        ])
+        
+        # Combine preprocessing steps
+        self.disposition_preprocessing = ColumnTransformer(
+            transformers=[
+                ('num', numerical_transformer, numerical_features),
+                ('cat', categorical_transformer, categorical_features)
+            ])
+        
+        return self.disposition_preprocessing
+        
+    def prepare_transportation_optimization_data(self, data):
+        """
+        Prepare and preprocess data for transportation optimization model
+        """
+        # Define feature types for transportation optimization
+        categorical_features = ['origin_type', 'destination_type', 'transport_mode', 
+                              'product_category', 'product_size_category', 'season']
+        numerical_features = ['distance_km', 'volume_cubic_m', 'weight_kg',
+                            'fuel_cost', 'labor_cost', 'time_sensitivity',
+                            'carbon_footprint_target']
+        
+        # Create preprocessing steps
+        categorical_transformer = Pipeline(steps=[
+            ('onehot', OneHotEncoder(handle_unknown='ignore'))
+        ])
+        
+        numerical_transformer = Pipeline(steps=[
+            ('scaler', StandardScaler())
+        ])
+        
+        # Combine preprocessing steps
+        self.transportation_preprocessing = ColumnTransformer(
+            transformers=[
+                ('num', numerical_transformer, numerical_features),
+                ('cat', categorical_transformer, categorical_features)
+            ])
+        
+        return self.transportation_preprocessing
+    
+    def prepare_processing_time_data(self, data):
+        """
+        Prepare and preprocess data for processing time prediction model
+        """
+        # Define feature types 
+        categorical_features = ['product_category', 'return_reason', 'return_condition',
+                               'warehouse_location', 'day_of_week', 'season']
+        numerical_features = ['price', 'days_since_purchase', 'customer_tenure_days',
+                             'current_warehouse_capacity', 'staff_availability',
+                             'return_processing_backlog']
+        
+        # Create preprocessing steps
+        categorical_transformer = Pipeline(steps=[
+            ('onehot', OneHotEncoder(handle_unknown='ignore'))
+        ])
+        
+        numerical_transformer = Pipeline(steps=[
+            ('scaler', StandardScaler())
+        ])
+        
+        # Combine preprocessing steps
+        self.time_preprocessing = ColumnTransformer(
+            transformers=[
+                ('num', numerical_transformer, numerical_features),
+                ('cat', categorical_transformer, categorical_features)
+            ])
+        
+        return self.time_preprocessing
+    
+    def train_return_prediction_model(self, X, y):
+        """
+        Train a model to predict the likelihood of a return for a given order
+        """
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        
+        # Create and train the pipeline with preprocessing
+        if self.return_preprocessing is None:
+            self.prepare_return_prediction_data(X)
+            
+        self.return_classifier = Pipeline(steps=[
+            ('preprocessor', self.return_preprocessing),
+            ('classifier', XGBClassifier(eval_metric='logloss'))
+        ])
+        
+        # Parameters for optimization
+        param_grid = {
+            'classifier__n_estimators': [100, 200],
+            'classifier__max_depth': [4, 6, 8],
+            'classifier__learning_rate': [0.01, 0.1]
+        }
+        
+        # Grid search with cross-validation
+        grid_search = GridSearchCV(
+            self.return_classifier, param_grid, cv=3, scoring='f1', n_jobs=-1
+        )
+        
+        # Train model
+        grid_search.fit(X_train, y_train)
+        self.return_classifier = grid_search.best_estimator_
+        
+        # Evaluate
+        y_pred = self.return_classifier.predict(X_test)
+        print("Return Prediction Model Performance:")
+        print(classification_report(y_test, y_pred))
+        
+        # Plot confusion matrix and save to file
+        cm = confusion_matrix(y_test, y_pred)
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+        plt.xlabel('Predicted')
+        plt.ylabel('Actual')
+        plt.title('Return Prediction Confusion Matrix')
+        plt.tight_layout()
+        plt.savefig('return_prediction_confusion_matrix.png')
+        plt.close()
+        print("Confusion matrix saved to 'return_prediction_confusion_matrix.png'")
+        
+        return self.return_classifier
+    
+    def train_disposition_decision_model(self, X, y):
+        """
+        Train a model to make disposition decisions for returned items
+        (resale, repair/remanufacture, recycle, or dispose)
+        """
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        
+        # Create and train the pipeline with preprocessing
+        if self.disposition_preprocessing is None:
+            self.prepare_disposition_decision_data(X)
+            
+        self.disposition_classifier = Pipeline(steps=[
+            ('preprocessor', self.disposition_preprocessing),
+            ('classifier', RandomForestClassifier(n_estimators=200, max_depth=10, random_state=42))
+        ])
+        
+        # Parameters for optimization
+        param_grid = {
+            'classifier__n_estimators': [100, 200, 300],
+            'classifier__max_depth': [8, 10, 12],
+            'classifier__min_samples_split': [2, 5, 10]
+        }
+        
+        # Grid search with cross-validation
+        grid_search = GridSearchCV(
+            self.disposition_classifier, param_grid, cv=3, scoring='accuracy', n_jobs=-1
+        )
+        
+        # Train model
+        grid_search.fit(X_train, y_train)
+        self.disposition_classifier = grid_search.best_estimator_
+        
+        # Evaluate
+        y_pred = self.disposition_classifier.predict(X_test)
+        print("Disposition Decision Model Performance:")
+        print(classification_report(y_test, y_pred))
+        
+        # Plot confusion matrix and save to file
+        cm = confusion_matrix(y_test, y_pred)
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                   xticklabels=['Resell', 'Repair/Remanufacture', 'Recycle', 'Dispose'],
+                   yticklabels=['Resell', 'Repair/Remanufacture', 'Recycle', 'Dispose'])
+        plt.xlabel('Predicted')
+        plt.ylabel('Actual')
+        plt.title('Disposition Decision Confusion Matrix')
+        plt.tight_layout()
+        plt.savefig('disposition_decision_confusion_matrix.png')
+        plt.close()
+        print("Confusion matrix saved to 'disposition_decision_confusion_matrix.png'")
+        
+        # Feature importance
+        if hasattr(self.disposition_classifier[-1], 'feature_importances_'):
+            self.disposition_preprocessing.fit(X)
+            feature_names = self.disposition_preprocessing.get_feature_names_out()
+            importances = self.disposition_classifier[-1].feature_importances_
+            indices = np.argsort(importances)[::-1]
+            
+            plt.figure(figsize=(12, 8))
+            plt.title('Feature Importances for Disposition Decision')
+            plt.bar(range(len(indices[:15])), importances[indices[:15]], align='center')
+            plt.xticks(range(len(indices[:15])), [feature_names[i] for i in indices[:15]], rotation=90)
+            plt.tight_layout()
+            plt.savefig('disposition_feature_importance.png')
+            plt.close()
+            print("Feature importance plot saved to 'disposition_feature_importance.png'")
+        
+        return self.disposition_classifier
+    
+    def train_transportation_optimization_model(self, X, y_cost, y_time):
+        """
+        Train a model to optimize transportation decisions for returned items
+        Predicts both cost and time for different transportation options
+        """
+        # Split data
+        X_train, X_test, y_cost_train, y_cost_test = train_test_split(X, y_cost, test_size=0.2, random_state=42)
+        _, _, y_time_train, y_time_test = train_test_split(X, y_time, test_size=0.2, random_state=42)
+        
+        # Create and train the pipeline with preprocessing for cost prediction
+        if self.transportation_preprocessing is None:
+            self.prepare_transportation_optimization_data(X)
+            
+        self.transportation_cost_regressor = Pipeline(steps=[
+            ('preprocessor', self.transportation_preprocessing),
+            ('regressor', GradientBoostingRegressor(n_estimators=200, max_depth=5, random_state=42))
+        ])
+        
+        # Create a separate model for time prediction
+        self.transportation_time_regressor = Pipeline(steps=[
+            ('preprocessor', self.transportation_preprocessing),
+            ('regressor', RandomForestRegressor(n_estimators=200, max_depth=8, random_state=42))
+        ])
+        
+        # Train cost model
+        self.transportation_cost_regressor.fit(X_train, y_cost_train)
+        
+        # Train time model
+        self.transportation_time_regressor.fit(X_train, y_time_train)
+        
+        # Evaluate cost model
+        y_cost_pred = self.transportation_cost_regressor.predict(X_test)
+        cost_rmse = np.sqrt(mean_squared_error(y_cost_test, y_cost_pred))
+        print(f"Transportation Cost Prediction RMSE: {cost_rmse:.4f}")
+        
+        # Evaluate time model
+        y_time_pred = self.transportation_time_regressor.predict(X_test)
+        time_rmse = np.sqrt(mean_squared_error(y_time_test, y_time_pred))
+        print(f"Transportation Time Prediction RMSE: {time_rmse:.4f}")
+        
+        # Plot actual vs predicted for cost
+        plt.figure(figsize=(10, 6))
+        plt.scatter(y_cost_test, y_cost_pred, alpha=0.5)
+        plt.plot([y_cost_test.min(), y_cost_test.max()], [y_cost_test.min(), y_cost_test.max()], 'r--')
+        plt.xlabel('Actual Transportation Cost')
+        plt.ylabel('Predicted Transportation Cost')
+        plt.title('Transportation Cost Prediction Performance')
+        plt.tight_layout()
+        plt.savefig('transportation_cost_prediction.png')
+        plt.close()
+        
+        # Plot actual vs predicted for time
+        plt.figure(figsize=(10, 6))
+        plt.scatter(y_time_test, y_time_pred, alpha=0.5)
+        plt.plot([y_time_test.min(), y_time_test.max()], [y_time_test.min(), y_time_test.max()], 'r--')
+        plt.xlabel('Actual Transportation Time')
+        plt.ylabel('Predicted Transportation Time')
+        plt.title('Transportation Time Prediction Performance')
+        plt.tight_layout()
+        plt.savefig('transportation_time_prediction.png')
+        plt.close()
+        
+        print("Transportation prediction plots saved")
+        
+        return self.transportation_cost_regressor, self.transportation_time_regressor
+    
+    def train_processing_time_model(self, X, y):
+        """
+        Train a model to predict the processing time for returned items
+        """
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        
+        # Create and train the pipeline with preprocessing
+        if self.time_preprocessing is None:
+            self.prepare_processing_time_data(X)
+            
+        self.processing_time_regressor = Pipeline(steps=[
+            ('preprocessor', self.time_preprocessing),
+            ('regressor', GradientBoostingRegressor())
+        ])
+        
+        # Parameters for optimization
+        param_grid = {
+            'regressor__n_estimators': [100, 200],
+            'regressor__max_depth': [3, 5, 7],
+            'regressor__learning_rate': [0.01, 0.1]
+        }
+        
+        # Grid search with cross-validation
+        grid_search = GridSearchCV(
+            self.processing_time_regressor, param_grid, cv=3, scoring='neg_mean_squared_error', n_jobs=-1
+        )
+        
+        # Train model
+        grid_search.fit(X_train, y_train)
+        self.processing_time_regressor = grid_search.best_estimator_
+        
+        # Evaluate
+        y_pred = self.processing_time_regressor.predict(X_test)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        print(f"Processing Time Prediction RMSE: {rmse:.4f}")
+        
+        # Plot actual vs predicted and save to file
+        plt.figure(figsize=(10, 6))
+        plt.scatter(y_test, y_pred, alpha=0.5)
+        plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--')
+        plt.xlabel('Actual Processing Time')
+        plt.ylabel('Predicted Processing Time')
+        plt.title('Processing Time Prediction Performance')
+        plt.tight_layout()
+        plt.savefig('processing_time_prediction.png')
+        plt.close()
+        print("Prediction performance plot saved to 'processing_time_prediction.png'")
+        
+        return self.processing_time_regressor
+    
+    def predict_return_probability(self, order_data):
+        """
+        Predict the probability of return for new orders
+        """
+        if self.return_classifier is None:
+            raise Exception("Return prediction model has not been trained yet")
+        
+        return self.return_classifier.predict_proba(order_data)[:, 1]
+    
+    def predict_disposition_decision(self, return_data):
+        """
+        Predict the optimal disposition decision for returned items
+        (resale, repair/remanufacture, recycle, or dispose)
+        """
+        if self.disposition_classifier is None:
+            raise Exception("Disposition decision model has not been trained yet")
+        
+        # Get class probabilities
+        disposition_probs = self.disposition_classifier.predict_proba(return_data)
+        
+        # Get class predictions (0=Resell, 1=Repair/Remanufacture, 2=Recycle, 3=Dispose)
+        disposition_class = self.disposition_classifier.predict(return_data)
+        
+        # Map class numbers to labels
+        disposition_mapping = {
+            0: 'Resell',
+            1: 'Repair/Remanufacture',
+            2: 'Recycle',
+            3: 'Dispose'
+        }
+        
+        disposition_labels = [disposition_mapping[c] for c in disposition_class]
+        
+        return disposition_labels, disposition_probs
+    
+    def predict_transportation_options(self, logistics_data, weight_cost=0.7, weight_time=0.3):
+        """
+        Predict and rank transportation options based on cost and time
+        Using weighted scoring of cost and time predictions
+        """
+        if self.transportation_cost_regressor is None or self.transportation_time_regressor is None:
+            raise Exception("Transportation optimization models have not been trained yet")
+        
+        # Predict costs and times
+        predicted_costs = self.transportation_cost_regressor.predict(logistics_data)
+        predicted_times = self.transportation_time_regressor.predict(logistics_data)
+        
+        # Normalize predictions (min-max scaling)
+        normalized_costs = (predicted_costs - predicted_costs.min()) / (predicted_costs.max() - predicted_costs.min())
+        normalized_times = (predicted_times - predicted_times.min()) / (predicted_times.max() - predicted_times.min())
+        
+        # Calculate weighted scores (lower is better)
+        weighted_scores = weight_cost * normalized_costs + weight_time * normalized_times
+        
+        # Return predictions and scores
+        return predicted_costs, predicted_times, weighted_scores
+    
+    def predict_processing_time(self, return_data):
+        """
+        Predict processing time for returns
+        """
+        if self.processing_time_regressor is None:
+            raise Exception("Processing time model has not been trained yet")
+        
+        return self.processing_time_regressor.predict(return_data)
+    
+    def optimize_warehouse_allocation(self, returns_batch, warehouse_capacities):
+        """
+        Optimize allocation of returns to warehouses based on predicted processing times
+        and current warehouse capacities
+        """
+        # This is a simplified version - could be extended with operations research techniques
+        processing_times = self.predict_processing_time(returns_batch)
+        
+        # Sort returns by predicted processing time (descending)
+        sorted_indices = np.argsort(-processing_times)
+        
+        # Allocate returns to warehouses based on capacity and processing time
+        allocation = {}
+        current_capacities = warehouse_capacities.copy()
+        
+        for idx in sorted_indices:
+            # Find warehouse with highest remaining capacity
+            best_warehouse = max(current_capacities, key=current_capacities.get)
+            
+            # Allocate return to this warehouse
+            if best_warehouse not in allocation:
+                allocation[best_warehouse] = []
+            
+            allocation[best_warehouse].append(idx)
+            
+            # Update capacity
+            current_capacities[best_warehouse] -= 1
+            if current_capacities[best_warehouse] <= 0:
+                del current_capacities[best_warehouse]
+                
+            # If no more capacity, stop allocation
+            if not current_capacities:
+                break
+                
+        return allocation
+
+    def optimize_end_to_end_process(self, order_data, return_data=None, logistics_data=None, 
+                                   warehouse_capacities=None, sustainability_weight=0.3):
+        """
+        End-to-end optimization of the reverse logistics process for a batch of orders/returns
+        Connects all models together to create a comprehensive optimization pipeline
+        """
+        results = {
+            'return_predictions': None,
+            'high_risk_orders': None,
+            'disposition_decisions': None,
+            'transportation_plans': None,
+            'warehouse_allocations': None,
+            'sustainability_metrics': None
+        }
+        
+        # Step 1: Predict return probabilities
+        return_probs = self.predict_return_probability(order_data)
+        results['return_predictions'] = return_probs
+        
+        # Identify high-risk orders (probability above threshold)
+        high_risk_threshold = 0.6
+        high_risk_indices = np.where(return_probs >= high_risk_threshold)[0]
+        results['high_risk_orders'] = high_risk_indices
+        
+        # If return data provided, proceed with disposition and transportation
+        if return_data is not None:
+            # Step 2: Predict optimal disposition for each return
+            disposition_labels, disposition_probs = self.predict_disposition_decision(return_data)
+            results['disposition_decisions'] = {
+                'labels': disposition_labels,
+                'probabilities': disposition_probs
+            }
+            
+            # Step 3: Estimate processing times
+            processing_times = self.predict_processing_time(return_data)
+            results['processing_times'] = processing_times
+            
+            # Step 4: If warehouse capacity data provided, optimize warehouse allocation
+            if warehouse_capacities is not None:
+                warehouse_allocation = self.optimize_warehouse_allocation(
+                    return_data, warehouse_capacities)
+                results['warehouse_allocations'] = warehouse_allocation
+            
+            # Step 5: If logistics data provided, optimize transportation
+            if logistics_data is not None:
+                # Get transportation predictions
+                predicted_costs, predicted_times, weighted_scores = self.predict_transportation_options(
+                    logistics_data, weight_cost=0.7-sustainability_weight, weight_time=0.3)
+                
+                results['transportation_plans'] = {
+                    'predicted_costs': predicted_costs,
+                    'predicted_times': predicted_times,
+                    'weighted_scores': weighted_scores
+                }
+                
+                # Calculate sustainability metrics (placeholder - in real system would be more sophisticated)
+                carbon_footprint = predicted_costs * 0.2  # Simplified estimation
+                waste_reduction = np.array([0.8 if d != 'Dispose' else 0 for d in disposition_labels])
+                resource_recovery = np.array([0.9 if d == 'Recycle' else 0.5 if d == 'Repair/Remanufacture' else 0.1 for d in disposition_labels])
+                
+                results['sustainability_metrics'] = {
+                    'carbon_footprint': carbon_footprint,
+                    'waste_reduction': waste_reduction,
+                    'resource_recovery': resource_recovery
+                }
+        
+        return results
+    
+    def save_models(self, path_prefix):
+        """
+        Save all trained models to files
+        """
+        if self.return_classifier:
+            joblib.dump(self.return_classifier, f"{path_prefix}_return_classifier.pkl")
+        
+        if self.processing_time_regressor:
+            joblib.dump(self.processing_time_regressor, f"{path_prefix}_processing_time_regressor.pkl")
+            
+        if self.disposition_classifier:
+            joblib.dump(self.disposition_classifier, f"{path_prefix}_disposition_classifier.pkl")
+            
+        if hasattr(self, 'transportation_cost_regressor') and self.transportation_cost_regressor:
+            joblib.dump(self.transportation_cost_regressor, f"{path_prefix}_transportation_cost_regressor.pkl")
+            
+        if hasattr(self, 'transportation_time_regressor') and self.transportation_time_regressor:
+            joblib.dump(self.transportation_time_regressor, f"{path_prefix}_transportation_time_regressor.pkl")
+            
+    def load_models(self, path_prefix):
+        """
+        Load all trained models from files
+        """
+        try:
+            self.return_classifier = joblib.load(f"{path_prefix}_return_classifier.pkl")
+        except:
+            print("Return classifier model not found")
+            
+        try:
+            self.processing_time_regressor = joblib.load(f"{path_prefix}_processing_time_regressor.pkl")
+        except:
+            print("Processing time model not found")
+            
+        try:
+            self.disposition_classifier = joblib.load(f"{path_prefix}_disposition_classifier.pkl")
+        except:
+            print("Disposition classifier model not found")
+            
+        try:
+            self.transportation_cost_regressor = joblib.load(f"{path_prefix}_transportation_cost_regressor.pkl")
+        except:
+            print("Transportation cost model not found")
+            
+        try:
+            self.transportation_time_regressor = joblib.load(f"{path_prefix}_transportation_time_regressor.pkl")
+        except:
+            print("Transportation time model not found")
+
+
+# Generate expanded sample data for the enhanced model
+def generate_enhanced_sample_data(n_samples=1000):
+    """
+    Generate sample data for demonstration purposes, including disposition and transportation data
+    """
+    np.random.seed(42)
+    
+    # Generate order data for return prediction
+    order_data = pd.DataFrame({
+        'product_category': np.random.choice(['Electronics', 'Clothing', 'Home', 'Beauty', 'Sports'], n_samples),
+        'price': np.random.uniform(10, 1000, n_samples),
+        'discount_percentage': np.random.uniform(0, 0.5, n_samples),
+        'order_total': np.random.uniform(10, 2000, n_samples),
+        'payment_method': np.random.choice(['Credit Card', 'PayPal', 'Bank Transfer', 'Crypto'], n_samples),
+        'shipping_method': np.random.choice(['Standard', 'Express', 'Next Day'], n_samples),
+        'days_until_delivery': np.random.randint(1, 10, n_samples),
+        'customer_segment': np.random.choice(['New', 'Regular', 'Premium', 'VIP'], n_samples),
+        'customer_tenure_days': np.random.randint(1, 1000, n_samples),
+        'previous_orders': np.random.randint(0, 50, n_samples),
+        'previous_returns': np.random.randint(0, 10, n_samples),
+        'day_of_week': np.random.choice(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'], n_samples),
+        'season': np.random.choice(['Spring', 'Summer', 'Fall', 'Winter'], n_samples)
+    })
+    
+    # Generate return label (1 = returned, 0 = not returned)
+    # Higher probability of return for expensive items with high discounts
+    return_prob = 0.1 + 0.2 * (order_data['price'] / 1000) + 0.3 * order_data['discount_percentage']
+    return_prob = np.clip(return_prob, 0, 0.7)
+    return_label = np.random.binomial(1, return_prob)
+    
+    # Generate disposition data (only for returned items)
+    returned_indices = np.where(return_label == 1)[0]
+    n_returns = len(returned_indices)
+    
+    if n_returns > 0:
+        # Processing time data
+        processing_data = pd.DataFrame({
+            'product_category': order_data.loc[returned_indices, 'product_category'].values,
+            'price': order_data.loc[returned_indices, 'price'].values,
+            'return_reason': np.random.choice(['Wrong Size', 'Defective', 'Not as Described', 'Changed Mind'], n_returns),
+            'return_condition': np.random.choice(['New', 'Used', 'Damaged'], n_returns),
+            'days_since_purchase': np.random.randint(1, 30, n_returns),
+            'warehouse_location': np.random.choice(['East', 'West', 'Central', 'North'], n_returns),
+            'customer_tenure_days': order_data.loc[returned_indices, 'customer_tenure_days'].values,
+            'current_warehouse_capacity': np.random.uniform(0.3, 1.0, n_returns),
+            'staff_availability': np.random.uniform(0.5, 1.0, n_returns),
+            'return_processing_backlog': np.random.randint(0, 100, n_returns),
+            'day_of_week': order_data.loc[returned_indices, 'day_of_week'].values,
+            'season': order_data.loc[returned_indices, 'season'].values
+        })
+        
+        # Generate disposition data
+        disposition_data = pd.DataFrame({
+            'product_category': processing_data['product_category'],
+            'price': processing_data['price'],
+            'days_since_purchase': processing_data['days_since_purchase'],
+            'return_reason': processing_data['return_reason'],
+            'product_age_days': np.random.randint(1, 365, n_returns),
+            'product_age_category': np.random.choice(['New', 'Nearly New', 'Used', 'Old'], n_returns),
+            'condition_score': np.random.uniform(1, 10, n_returns),
+            'estimated_repair_cost': np.random.uniform(0, 200, n_returns),
+            'estimated_resale_value': np.random.uniform(0, 500, n_returns),
+            'recyclable_components_percentage': np.random.uniform(0, 100, n_returns),
+            'brand_tier': np.random.choice(['Economy', 'Mid-range', 'Premium', 'Luxury'], n_returns),
+            'season': processing_data['season']
+        })
+        
+        # Generate disposition labels (0=Resell, 1=Repair/Remanufacture, 2=Recycle, 3=Dispose)
+        # Logic for disposition decision based on condition and other factors
+# Logic for disposition decision based on condition and other factors
+        disposition_label = np.zeros(n_returns, dtype=int)
+            
+        for i in range(n_returns):
+                condition = disposition_data.loc[i, 'condition_score']
+                repair_cost = disposition_data.loc[i, 'estimated_repair_cost']
+                resale_value = disposition_data.loc[i, 'estimated_resale_value']
+                recyclable = disposition_data.loc[i, 'recyclable_components_percentage']
+                
+                # Resell if in good condition
+                if condition > 8.0 and disposition_data.loc[i, 'return_reason'] != 'Defective':
+                    disposition_label[i] = 0  # Resell
+                # Repair if worth repairing
+                elif condition > 5.0 and repair_cost < resale_value * 0.5:
+                    disposition_label[i] = 1  # Repair/Remanufacture
+                # Recycle if high recyclable content
+                elif recyclable > 60.0:
+                    disposition_label[i] = 2  # Recycle
+                # Otherwise dispose
+                else:
+                    disposition_label[i] = 3  # Dispose
+        
+        # Generate transportation optimization data
+        transport_data = pd.DataFrame({
+            'origin_type': np.random.choice(['Customer', 'Store', 'Dropoff Point'], n_returns),
+            'destination_type': np.random.choice(['Warehouse', 'Repair Center', 'Recycling Facility'], n_returns),
+            'transport_mode': np.random.choice(['Truck', 'Van', 'Rail', 'Air'], n_returns),
+            'product_category': disposition_data['product_category'],
+            'product_size_category': np.random.choice(['Small', 'Medium', 'Large', 'Extra Large'], n_returns),
+            'distance_km': np.random.uniform(10, 1000, n_returns),
+            'volume_cubic_m': np.random.uniform(0.01, 10, n_returns),
+            'weight_kg': np.random.uniform(0.1, 100, n_returns),
+            'fuel_cost': np.random.uniform(1, 5, n_returns),
+            'labor_cost': np.random.uniform(10, 30, n_returns),
+            'time_sensitivity': np.random.uniform(1, 10, n_returns),
+            'carbon_footprint_target': np.random.uniform(0.1, 1.5, n_returns),
+            'season': disposition_data['season']
+        })
+        
+        # Generate transportation cost and time targets
+        transport_cost = (transport_data['distance_km'] * transport_data['fuel_cost'] * 0.1 + 
+                         transport_data['weight_kg'] * 0.2 + 
+                         transport_data['labor_cost'] * 2)
+        
+        # Add some variability based on transport mode
+        mode_multipliers = {'Truck': 1.0, 'Van': 0.8, 'Rail': 1.2, 'Air': 3.0}
+        for mode in mode_multipliers:
+            mask = transport_data['transport_mode'] == mode
+            transport_cost[mask] *= mode_multipliers[mode]
+        
+        # Generate transportation time (hours)
+        transport_time = (transport_data['distance_km'] / 70)  # Average 70 km/h
+        
+        # Adjust time based on mode
+        time_multipliers = {'Truck': 1.0, 'Van': 1.2, 'Rail': 0.8, 'Air': 0.3}
+        for mode in time_multipliers:
+            mask = transport_data['transport_mode'] == mode
+            transport_time[mask] *= time_multipliers[mode]
+        
+        # Add loading/unloading time
+        transport_time += transport_data['weight_kg'] * 0.01 + transport_data['volume_cubic_m'] * 0.1
+        
+        # Generate processing time (minutes)
+        processing_time = (50 + 
+                           disposition_data['product_age_days'] * 0.05 +
+                           (10 - disposition_data['condition_score']) * 30 +
+                           np.random.normal(0, 15, n_returns))
+        
+        # Adjust processing time based on return reason and warehouse metrics
+        reason_multipliers = {'Wrong Size': 0.8, 'Defective': 1.5, 'Not as Described': 1.2, 'Changed Mind': 0.9}
+        for reason in reason_multipliers:
+            mask = processing_data['return_reason'] == reason
+            processing_time[mask] *= reason_multipliers[reason]
+        
+        # Processing time increases as warehouse gets full and with higher backlog
+        processing_time *= (1 + (1 - processing_data['current_warehouse_capacity']) * 0.5)
+        processing_time *= (1 + processing_data['return_processing_backlog'] * 0.003)
+        
+        # Ensure all times are positive
+        processing_time = np.maximum(10, processing_time)
+        
+        return (order_data, return_label, 
+                processing_data, processing_time, 
+                disposition_data, disposition_label,
+                transport_data, transport_cost, transport_time)
+    else:
+        # If no returns, return empty DataFrames for the return-related data
+        return (order_data, return_label, 
+                pd.DataFrame(), np.array([]), 
+                pd.DataFrame(), np.array([]),
+                pd.DataFrame(), np.array([]), np.array([]))
+
+def demonstrate_enhanced_model():
+    """
+    Demonstrate the enhanced reverse logistics model with sample data
+    """
+    print("=== Enhanced Reverse Logistics Model Demonstration ===")
+    print("Generating sample data...")
+    
+    # Generate sample data
+    (order_data, return_label, 
+     processing_data, processing_time, 
+     disposition_data, disposition_label,
+     transport_data, transport_cost, transport_time) = generate_enhanced_sample_data(2000)
+    
+    # Create and train the model
+    model = EnhancedReverseLogisticsModel()
+    
+    # Train return prediction model
+    print("\n=== Training Return Prediction Model ===")
+    model.train_return_prediction_model(order_data, return_label)
+    
+    # If there are returns, train the other models
+    if len(processing_data) > 0:
+        # Train processing time model
+        print("\n=== Training Processing Time Model ===")
+        model.train_processing_time_model(processing_data, processing_time)
+        
+        # Train disposition decision model
+        print("\n=== Training Disposition Decision Model ===")
+        model.train_disposition_decision_model(disposition_data, disposition_label)
+        
+        # Train transportation optimization model
+        print("\n=== Training Transportation Optimization Model ===")
+        model.train_transportation_optimization_model(transport_data, transport_cost, transport_time)
+        
+        # Demonstrate end-to-end optimization
+        print("\n=== Demonstrating End-to-End Optimization ===")
+        
+        # Create sample new data with combined return features
+        new_order_sample = order_data.iloc[:5].copy()
+
+       # Merge processing and disposition data for comprehensive return data
+        new_return_sample = processing_data.iloc[:5].copy()
+        disposition_features = disposition_data.iloc[:5].drop(
+        columns=['product_category', 'season', 'price', 'days_since_purchase', 'return_reason']
+        )
+        new_return_sample = pd.concat([new_return_sample, disposition_features], axis=1)
+
+        new_transport_sample = transport_data.iloc[:5].copy()
+        
+        # Define sample warehouse capacities
+        warehouse_capacities = {
+            'East': 10,
+            'West': 15,
+            'Central': 20,
+            'North': 5
+        }
+        
+        # Optimize end-to-end process
+        results = model.optimize_end_to_end_process(
+            new_order_sample, new_return_sample, new_transport_sample, warehouse_capacities)
+        
+        # Print results
+        print("\nReturn Prediction Results:")
+        for i, prob in enumerate(results['return_predictions']):
+            print(f"Order {i+1}: Return Probability = {prob:.2f}")
+        
+        print("\nHigh Risk Orders (Return Probability >= 0.6):")
+        if len(results['high_risk_orders']) > 0:
+            for idx in results['high_risk_orders']:
+                print(f"Order {idx+1}")
+        else:
+            print("No high risk orders identified")
+        
+        print("\nDisposition Decisions:")
+        for i, label in enumerate(results['disposition_decisions']['labels']):
+            print(f"Return {i+1}: {label}")
+        
+        print("\nWarehouse Allocations:")
+        for warehouse, items in results['warehouse_allocations'].items():
+            print(f"{warehouse} Warehouse: {len(items)} items")
+        
+        print("\nTransportation Plan (Top Option):")
+        for i in range(len(new_transport_sample)):
+            print(f"Return {i+1}: Cost = Ksh{results['transportation_plans']['predicted_costs'][i]:.2f}, " +
+                 f"Time = {results['transportation_plans']['predicted_times'][i]:.2f} hours")
+        
+        print("\nSustainability Metrics:")
+        print(f"Average Carbon Footprint: {np.mean(results['sustainability_metrics']['carbon_footprint']):.2f}")
+        print(f"Average Waste Reduction: {np.mean(results['sustainability_metrics']['waste_reduction']):.2f}")
+        print(f"Average Resource Recovery: {np.mean(results['sustainability_metrics']['resource_recovery']):.2f}")
+        
+        # Save models
+        print("\n=== Saving Models ===")
+        model.save_models("enhanced_reverse_logistics")
+    else:
+        print("\nNo returns in the sample data. Only return prediction model was trained.")
+
+if __name__ == "__main__":
+    demonstrate_enhanced_model()
